@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import type { JwtPayload, AuthContext } from '../types/index.js';
+import type { JwtPayload } from '../types/index.js';
 
 /**
  * JWT 认证插件
@@ -23,7 +23,7 @@ export async function authPlugin(fastify: FastifyInstance) {
         roles: decoded.roles || []
       };
     } catch (err) {
-      reply.code(401).send({ error: 'Unauthorized', message: 'Invalid or expired token' });
+      reply.code(401).send({ code: 401, data: null, message: 'Unauthorized: Invalid or expired token' });
     }
   });
 

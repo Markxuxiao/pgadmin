@@ -2,10 +2,9 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import sensible from '@fastify/sensible';
 import jwt from '@fastify/jwt';
+import Knex from 'knex';
 import { config } from './config.js';
 import { authPlugin } from './plugins/auth.js';
-import { tenantPlugin } from './plugins/tenant.js';
-import { postgrestPlugin } from './plugins/postgrest.js';
 import { registerRoutes } from './routes/index.js';
 
 async function buildApp() {
@@ -28,8 +27,21 @@ async function buildApp() {
 
   // 自定义插件
   await app.register(authPlugin);
-  await app.register(tenantPlugin);
-  await app.register(postgrestPlugin);
+
+  // 数据库连接（knex）
+  const db = Knex({
+    client: 'pg',
+    connection: process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/pgadmin',
+    pool: { min: 2, max: 10 }
+  });
+
+  // 挂载到 fastify 实例
+  app.decorate('db', db);
+
+  // 清理
+  app.addHook('onClose', async () => {
+    await db.destroy();
+  });
 
   // 注册路由
   await registerRoutes(app);
