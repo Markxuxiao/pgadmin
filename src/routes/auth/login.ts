@@ -16,7 +16,7 @@ export async function loginRoutes(app: FastifyInstance) {
     const body = loginSchema.parse(request.body);
 
     // 1. 查询租户
-    const tenant = await app.pg('tenants')
+    const tenant = await app.db('tenants')
       .where('code', body.tenantCode)
       .where('status', 'active')
       .first();
@@ -26,7 +26,7 @@ export async function loginRoutes(app: FastifyInstance) {
     }
 
     // 2. 查询用户
-    const user = await app.pg('users')
+    const user = await app.db('users')
       .where('tenant_id', tenant.id)
       .where('username', body.username)
       .where('status', 'active')
@@ -43,7 +43,7 @@ export async function loginRoutes(app: FastifyInstance) {
     }
 
     // 4. 查询用户角色
-    const roles = await app.pg('user_roles')
+    const roles = await app.db('user_roles')
       .join('roles', 'user_roles.role_id', 'roles.id')
       .where('user_roles.user_id', user.id)
       .where('roles.status', 'active')
@@ -52,7 +52,7 @@ export async function loginRoutes(app: FastifyInstance) {
     const roleCodes = roles.map((r: { code: string }) => r.code);
 
     // 5. 更新最后登录时间
-    await app.pg('users')
+    await app.db('users')
       .where('id', user.id)
       .update({ last_login_at: new Date() });
 
@@ -93,7 +93,7 @@ export async function loginRoutes(app: FastifyInstance) {
     const passwordHash = await bcrypt.hash(body.password, 10);
 
     // 在事务中创建
-    const result = await app.pg.transaction(async (trx) => {
+    const result = await app.db.transaction(async (trx: any) => {
       // 创建租户
       const [tenant] = await trx('tenants')
         .insert({

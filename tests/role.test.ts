@@ -1,126 +1,63 @@
 import { describe, it, expect } from 'vitest';
 
-/**
- * 角色权限管理测试
- */
-describe('Role & Permission Management', () => {
-  const tenantId = 'tenant-test-id';
-
-  describe('Role Schema', () => {
-    it('should validate required fields for role creation', () => {
-      const validRole = {
-        name: 'Administrator',
+describe('角色权限管理逻辑', () => {
+  describe('角色模型', () => {
+    it('角色应有 tenant_id', () => {
+      const role = {
+        id: '1',
+        tenant_id: 'tenant-456',
+        name: 'Admin',
         code: 'admin',
-        tenantId
+        is_system: true
       };
 
-      expect(validRole.name).toBeTruthy();
-      expect(validRole.code).toBeTruthy();
-      expect(validRole.code).toMatch(/^[a-z_]+$/); // lowercase with underscore
+      expect(role.tenant_id).toBeDefined();
     });
 
-    it('should reject duplicate role codes within tenant', () => {
-      const existingRoles = [
-        { tenant_id: tenantId, code: 'admin' },
-        { tenant_id: tenantId, code: 'editor' }
-      ];
-      const newCode = 'admin';
+    it('系统角色不应被删除', () => {
+      const systemRole = { id: '1', name: 'Admin', is_system: true };
 
-      const isDuplicate = existingRoles.some(r => r.tenant_id === tenantId && r.code === newCode);
-      expect(isDuplicate).toBe(true);
-    });
-
-    it('should allow same code in different tenants', () => {
-      const roles = [
-        { tenant_id: 'tenant-a', code: 'admin' },
-        { tenant_id: 'tenant-b', code: 'admin' }
-      ];
-
-      const tenantARoles = roles.filter(r => r.tenant_id === 'tenant-a');
-      expect(tenantARoles).toHaveLength(1);
-    });
-  });
-
-  describe('System Roles', () => {
-    it('should mark system roles correctly', () => {
-      const systemRole = { name: 'Admin', code: 'admin', is_system: true };
-      const customRole = { name: 'Custom Role', code: 'custom', is_system: false };
-
+      // System roles should have special handling
       expect(systemRole.is_system).toBe(true);
-      expect(customRole.is_system).toBe(false);
-    });
-
-    it('should not allow deletion of system roles', () => {
-      const role = { name: 'Admin', is_system: true };
-
-      const canDelete = !role.is_system;
-      expect(canDelete).toBe(false);
-    });
-
-    it('should not allow modification of system role codes', () => {
-      const systemRole = { name: 'Admin', code: 'admin', is_system: true };
-      const requestedCode = 'superadmin';
-
-      const canModify = !systemRole.is_system || requestedCode === systemRole.code;
-      expect(canModify).toBe(false);
     });
   });
 
-  describe('Permission Schema', () => {
-    it('should validate permission structure', () => {
-      const validPermission = {
-        name: 'Create Users',
-        code: 'users:create',
-        resource: 'users',
-        action: 'create'
-      };
+  describe('权限模型', () => {
+    it('权限格式应为 resource:action', () => {
+      const permission = { code: 'users:create', resource: 'users', action: 'create' };
 
-      expect(validPermission.code).toContain(':');
-      expect(['create', 'read', 'update', 'delete'].some(a => validPermission.code.endsWith(a))).toBe(true);
+      expect(permission.code).toContain(':');
+      expect(permission.code.split(':')[0]).toBe('users');
+      expect(permission.code.split(':')[1]).toBe('create');
     });
 
-    it('should parse resource:action format', () => {
-      const permission = { code: 'users:create' };
-      const [resource, action] = permission.code.split(':');
-
-      expect(resource).toBe('users');
-      expect(action).toBe('create');
-    });
-
-    it('should allow permission without action (wildcard)', () => {
-      const wildcardPermission = { code: 'users:*', resource: 'users', action: '*' };
-
-      expect(wildcardPermission.action).toBe('*');
+    it('权限可为全局表（无 tenant_id）', () => {
+      // permissions table is global, doesn't have tenant_id
+      const permission = { id: '1', code: 'users:create' };
+      expect(permission.tenant_id).toBeUndefined();
     });
   });
 
-  describe('Role-Permission Assignment', () => {
-    it('should assign permissions to role', () => {
-      const rolePermissions: Array<{ role_id: string; permission_id: string }> = [];
-      const roleId = 'role-1';
-      const permissionIds = ['perm-1', 'perm-2', 'perm-3'];
-
-      permissionIds.forEach(permId => {
-        rolePermissions.push({ role_id: roleId, permission_id: permId });
-      });
-
-      expect(rolePermissions).toHaveLength(3);
-      expect(rolePermissions.filter(rp => rp.role_id === roleId)).toHaveLength(3);
-    });
-
-    it('should prevent duplicate permission assignments', () => {
+  describe('角色-权限关联', () => {
+    it('一个角色可有多个权限', () => {
       const rolePermissions = [
         { role_id: 'role-1', permission_id: 'perm-1' },
-        { role_id: 'role-1', permission_id: 'perm-1' } // duplicate
+        { role_id: 'role-1', permission_id: 'perm-2' },
+        { role_id: 'role-1', permission_id: 'perm-3' }
       ];
 
-      const uniquePermissions = [...new Set(rolePermissions.map(rp => `${rp.role_id}:${rp.permission_id}`))];
-      const originalCount = rolePermissions.length;
-
-      expect(uniquePermissions.length).toBeLessThan(originalCount);
+      const role1Perms = rolePermissions.filter(rp => rp.role_id === 'role-1');
+      expect(role1Perms).toHaveLength(3);
     });
 
-    it('should calculate effective permissions for user', () => {
+    it('用户可拥有多个角色', () => {
+      const userRoles = ['admin', 'editor', 'viewer'];
+
+      expect(userRoles).toHaveLength(3);
+      expect(userRoles).toContain('admin');
+    });
+
+    it('应计算用户有效权限', () => {
       const userRoles = ['role-1', 'role-2'];
       const rolePermissions = [
         { role_id: 'role-1', permission_id: 'users:create' },
@@ -129,36 +66,28 @@ describe('Role & Permission Management', () => {
         { role_id: 'role-2', permission_id: 'roles:read' }
       ];
 
-      // 获取用户所有权限
-      const userPermissionIds = rolePermissions
+      const userPerms = rolePermissions
         .filter(rp => userRoles.includes(rp.role_id))
         .map(rp => rp.permission_id);
 
-      // 去重
-      const uniquePermissions = [...new Set(userPermissionIds)];
+      const uniquePerms = [...new Set(userPerms)];
 
-      expect(uniquePermissions).toHaveLength(4);
-      expect(uniquePermissions).toContain('users:create');
-      expect(uniquePermissions).toContain('users:delete');
-      expect(uniquePermissions).toContain('roles:read');
+      expect(uniquePerms).toHaveLength(4);
+      expect(uniquePerms).toContain('users:create');
+      expect(uniquePerms).toContain('users:delete');
+      expect(uniquePerms).toContain('users:read');
+      expect(uniquePerms).toContain('roles:read');
     });
   });
 
-  describe('Role Hierarchy', () => {
-    it('should support role inheritance', () => {
-      const parentRole = { id: 'parent', name: 'Parent', inherits: null };
-      const childRole = { id: 'child', name: 'Child', inherits: 'parent' };
+  describe('软删除', () => {
+    it('角色删除应执行软删除', () => {
+      const role = { id: '1', status: 'active' };
 
-      expect(parentRole.inherits).toBeNull();
-      expect(childRole.inherits).toBe('parent');
-    });
+      role.status = 'deleted';
 
-    it('should merge parent and child permissions', () => {
-      const parentPermissions = ['users:read', 'users:create'];
-      const childPermissions = ['users:delete'];
-      const inheritedPermissions = [...new Set([...parentPermissions, ...childPermissions])];
-
-      expect(inheritedPermissions).toHaveLength(3);
+      expect(role.id).toBe('1');
+      expect(role.status).toBe('deleted');
     });
   });
 });

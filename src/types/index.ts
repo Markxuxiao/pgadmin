@@ -107,9 +107,15 @@ export interface AuthContext {
 // 请求上下文（Fastify 扩展）
 // =====================================================
 
+import type { Knex } from 'knex';
+
 declare module 'fastify' {
   interface FastifyRequest {
     auth: AuthContext;
+  }
+
+  interface FastifyInstance {
+    db: Knex;
   }
 }
 
