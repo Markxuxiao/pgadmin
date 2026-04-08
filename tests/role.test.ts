@@ -117,7 +117,7 @@ describe('Role & Permission Management', () => {
       const uniquePermissions = [...new Set(rolePermissions.map(rp => `${rp.role_id}:${rp.permission_id}`))];
       const originalCount = rolePermissions.length;
 
-      expect(uniquePermissions.size).toBeLessThan(originalCount);
+      expect(uniquePermissions.length).toBeLessThan(originalCount);
     });
 
     it('should calculate effective permissions for user', () => {
@@ -137,9 +137,10 @@ describe('Role & Permission Management', () => {
       // 去重
       const uniquePermissions = [...new Set(userPermissionIds)];
 
-      expect(uniquePermissions).toHaveLength(3);
+      expect(uniquePermissions).toHaveLength(4);
       expect(uniquePermissions).toContain('users:create');
       expect(uniquePermissions).toContain('users:delete');
+      expect(uniquePermissions).toContain('roles:read');
     });
   });
 
