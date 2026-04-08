@@ -10,6 +10,9 @@ export default defineConfig({
       reporter: ['text', 'json', 'html'],
       include: ['src/**/*.ts'],
       exclude: ['src/types/**', 'src/app.ts']
+    },
+    alias: {
+      bcrypt: '/Users/xuxiao/conductor/workspaces/pgadmin/provo/tests/__mocks__/bcrypt.js'
     }
   }
 });
