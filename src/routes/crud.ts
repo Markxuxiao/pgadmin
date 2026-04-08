@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { z } from 'zod';
 import { success, error, paginated } from '../utils/response.js';
 import { auditLog } from '../plugins/audit.js';
+import { parseQueryToKnex } from '../common/knex-query.parser.js';
 
 // 需要软删除的表（统一用 status = 'deleted'）
 const SOFT_DELETE_TABLES = ['users', 'roles', 'menus', 'org_departments', 'tenants'];
@@ -9,21 +9,8 @@ const SOFT_DELETE_TABLES = ['users', 'roles', 'menus', 'org_departments', 'tenan
 // 允许直接操作的表（不需要 tenant 隔离）
 const GLOBAL_TABLES = ['permissions'];
 
-// 分页默认配置
-const DEFAULT_PAGE = 1;
-const DEFAULT_PAGE_SIZE = 20;
-const MAX_PAGE_SIZE = 100;
-
-// 列表查询 schema
-const listQuerySchema = z.object({
-  page: z.coerce.number().min(1).default(DEFAULT_PAGE),
-  pageSize: z.coerce.number().min(1).max(MAX_PAGE_SIZE).default(DEFAULT_PAGE_SIZE),
-  search: z.string().optional(),
-  sortBy: z.string().optional().default('created_at'),
-  sortOrder: z.enum(['asc', 'desc']).optional().default('desc'),
-  // 动态字段筛选
-  status: z.enum(['active', 'inactive', 'deleted']).optional()
-});
+// 不需要租户隔离的表（表本身是租户相关但没有 tenant_id 列）
+const NO_TENANT_TABLES = ['tenants'];
 
 function shouldSoftDelete(table: string): boolean {
   return SOFT_DELETE_TABLES.includes(table);
@@ -33,63 +20,55 @@ function isGlobalTable(table: string): boolean {
   return GLOBAL_TABLES.includes(table);
 }
 
+function needsTenantIsolation(table: string): boolean {
+  return !isGlobalTable(table) && !NO_TENANT_TABLES.includes(table);
+}
+
 export async function crudRoutes(app: FastifyInstance) {
   // =====================================================
   // GET /:entity - 列表
   // =====================================================
   app.get('/api/:entity', async (request: FastifyRequest, reply: FastifyReply) => {
     const { entity } = request.params as { entity: string };
-    const table = entity; // 直接使用复数表名
-
-    const query = listQuerySchema.parse(request.query);
+    const table = entity;
     const tenantId = request.auth?.tenantId;
+    const query = request.query as Record<string, any>;
 
-    // 构建查询
     let dbQuery = app.db(table);
 
     // 全局表不加 tenant 过滤
-    if (!isGlobalTable(table) && tenantId) {
+    if (needsTenantIsolation(table) && tenantId) {
       dbQuery = dbQuery.where('tenant_id', tenantId);
     }
 
-    // 软删除过滤
-    if (shouldSoftDelete(table) && query.status !== 'deleted') {
-      dbQuery = dbQuery.whereNot('status', 'deleted');
+    // 软删除过滤（默认排除 deleted）
+    if (shouldSoftDelete(table)) {
+      const statusFilter = query.status;
+      if (!statusFilter || statusFilter === 'active' || statusFilter === 'inactive') {
+        dbQuery = dbQuery.whereNot('status', 'deleted');
+      }
     }
 
-    // status 筛选
-    if (query.status && shouldSoftDelete(table)) {
-      dbQuery = dbQuery.where('status', query.status);
+    // 使用通用查询解析器
+    dbQuery = parseQueryToKnex(query, dbQuery);
+
+    // 总数查询
+    let countQuery = app.db(table);
+    if (needsTenantIsolation(table) && tenantId) {
+      countQuery = countQuery.where('tenant_id', tenantId);
+    }
+    if (shouldSoftDelete(table) && !query.status) {
+      countQuery = countQuery.whereNot('status', 'deleted');
     }
 
-    // 搜索（简单实现，可扩展）
-    if (query.search) {
-      dbQuery = dbQuery.where((builder) => {
-        builder
-          .whereILike('name', `%${query.search}%`)
-          .orWhereILike('code', `%${query.search}%`)
-          .orWhereILike('username', `%${query.search}%`)
-          .orWhereILike('email', `%${query.search}%`);
-      });
-    }
-
-    // 总数
-    const countQuery = app.db(table);
-    if (!isGlobalTable(table) && tenantId) {
-      countQuery.where('tenant_id', tenantId);
-    }
     const [{ count }] = await countQuery.count({ count: '*' });
     const total = Number(count);
 
-    // 排序和分页
-    dbQuery = dbQuery
-      .orderBy(query.sortBy, query.sortOrder)
-      .limit(query.pageSize)
-      .offset((query.page - 1) * query.pageSize);
-
+    const limit = query.limit ? +query.limit : 20;
+    const offset = query.offset ? +query.offset : 0;
+    const page = Math.floor(offset / limit) + 1;
     const data = await dbQuery;
-
-    return paginated(data, total, query.page, query.pageSize);
+    return paginated(data, total, page, limit);
   });
 
   // =====================================================
@@ -102,7 +81,7 @@ export async function crudRoutes(app: FastifyInstance) {
 
     let dbQuery = app.db(table).where('id', id);
 
-    if (!isGlobalTable(table) && tenantId) {
+    if (needsTenantIsolation(table) && tenantId) {
       dbQuery = dbQuery.where('tenant_id', tenantId);
     }
 
@@ -126,7 +105,7 @@ export async function crudRoutes(app: FastifyInstance) {
     const body = request.body as Record<string, unknown>;
 
     // 添加 tenant_id（除全局表外）
-    if (!isGlobalTable(table) && tenantId) {
+    if (needsTenantIsolation(table) && tenantId) {
       body.tenant_id = tenantId;
     }
     body.created_at = new Date();
@@ -152,7 +131,7 @@ export async function crudRoutes(app: FastifyInstance) {
 
     // 检查是否存在
     let checkQuery = app.db(table).where('id', id);
-    if (!isGlobalTable(table) && tenantId) {
+    if (needsTenantIsolation(table) && tenantId) {
       checkQuery = checkQuery.where('tenant_id', tenantId);
     }
 
@@ -171,14 +150,14 @@ export async function crudRoutes(app: FastifyInstance) {
 
     // 更新时必须包含 tenant_id 过滤，防止跨租户修改
     let updateQuery = app.db(table).where('id', id);
-    if (!isGlobalTable(table) && tenantId) {
+    if (needsTenantIsolation(table) && tenantId) {
       updateQuery = updateQuery.where('tenant_id', tenantId);
     }
     await updateQuery.update(body);
 
     // 获取更新后的数据
     let getQuery = app.db(table).where('id', id);
-    if (!isGlobalTable(table) && tenantId) {
+    if (needsTenantIsolation(table) && tenantId) {
       getQuery = getQuery.where('tenant_id', tenantId);
     }
     const [row] = await getQuery.returning('*');
@@ -199,7 +178,7 @@ export async function crudRoutes(app: FastifyInstance) {
 
     // 检查是否存在
     let checkQuery = app.db(table).where('id', id);
-    if (!isGlobalTable(table) && tenantId) {
+    if (needsTenantIsolation(table) && tenantId) {
       checkQuery = checkQuery.where('tenant_id', tenantId);
     }
 
@@ -210,7 +189,7 @@ export async function crudRoutes(app: FastifyInstance) {
 
     // 删除时必须包含 tenant_id 过滤，防止跨租户删除
     let deleteQuery = app.db(table).where('id', id);
-    if (!isGlobalTable(table) && tenantId) {
+    if (needsTenantIsolation(table) && tenantId) {
       deleteQuery = deleteQuery.where('tenant_id', tenantId);
     }
 
