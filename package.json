@@ -1,0 +1,35 @@
+{
+  "name": "pgadmin",
+  "version": "1.0.0",
+  "description": "通用后台管理系统 API",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/app.ts",
+    "build": "tsc",
+    "start": "node dist/app.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "knex": "tsx node_modules/.bin/knex",
+    "knex:migrate": "pnpm knex migrate:latest",
+    "knex:seed": "pnpm knex seed:run"
+  },
+  "dependencies": {
+    "fastify": "^5.2.1",
+    "@fastify/cors": "^10.0.2",
+    "@fastify/jwt": "^9.0.2",
+    "@fastify/sensible": "^6.0.3",
+    "knex": "^3.1.0",
+    "pg": "^8.13.1",
+    "dotenv": "^16.4.7",
+    "zod": "^3.24.1",
+    "bcrypt": "^5.1.1"
+  },
+  "devDependencies": {
+    "@types/bcrypt": "^5.0.2",
+    "@types/node": "^22.10.7",
+    "@types/pg": "^8.11.10",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.4"
+  }
+}
